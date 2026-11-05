@@ -95,15 +95,15 @@ export function parseStatementDate(raw) {
   let year;
   let month;
   let day;
-  let match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(text);
+  let match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (match) {
     [, year, month, day] = match;
   } else {
-    match = /^(\\d{2})[/-](\\d{2})[/-](\\d{4})$/.exec(text);
+    match = /^(\d{2})[/-](\d{2})[/-](\d{4})$/.exec(text);
     if (match) {
       [, day, month, year] = match;
     } else {
-      match = /^(\\d{2})[/-](\\d{2})[/-](\\d{2})$/.exec(text);
+      match = /^(\d{2})[/-](\d{2})[/-](\d{2})$/.exec(text);
       if (!match) return null;
       [, day, month] = match;
       year = String(Number(match[3]) < 70 ? 2000 + Number(match[3]) : 1900 + Number(match[3]));
