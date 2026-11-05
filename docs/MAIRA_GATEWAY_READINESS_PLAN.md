@@ -70,6 +70,26 @@ These cannot be granted by code or by changing a UI:
 - [ ] Test environment is separate from live credentials and live bank accounts.
 - [ ] Bank/acquirer and legal/compliance approvals are documented before live launch.
 
+## Feature-branch implementation update
+
+The feature branch now includes these code-level changes (not yet independently executed in a local checkout):
+
+- First-party merchant provisioning for MAIRA AI VOICE AGENT and SMART MONEY, using separate server-only API keys, encrypted webhook secrets and HTTPS receiver URLs.
+- Production payment creation requires a valid server-side merchant API key or signed order token; the anonymous default-merchant demo path is not allowed in production.
+- Admin dashboard includes a bank-statement CSV import/reconciliation view.
+- Statement parser rejects impossible calendar dates and unsafe integer paise amounts.
+- RECONCILED status transitions are added to the durable webhook outbox, including a migration that preserves existing outbox rows; recovery now looks for missing RECONCILED deliveries by event type.
+- Regression tests were added for statement parser edge cases, first-party merchant isolation/provisioning, anonymous production order rejection and durable RECONCILED webhook delivery.
+
+Still required before either app can fulfill purchases:
+
+- Implement and test the MAIRA server-side order endpoint, raw-body webhook receiver and atomic coin-ledger credit function in the MAIRA repository.
+- Implement and test the SMART MONEY server-side order endpoint, raw-body webhook receiver and atomic package-payment record/approval handoff in the SMART MONEY repository.
+- Configure the six first-party environment variables in the payment API hosting environment, then configure each app's own receiving account and verify the bank-approved receiving setup.
+- Execute the full Node workspace test/build/typecheck/dependency audit and a synthetic sandbox end-to-end run. GitHub/Vercel checks must be green before considering a pilot.
+
+No production deployment, live payment switch, live bank transaction or Razorpay removal is included in this feature-branch work.
+
 ## Important status
 
 This document records repository inspection and an implementation checklist. It does not claim that the gateway has passed tests or is approved for real-money production. The earlier static `index.html` preview is not evidence of a working payment service.
