@@ -64,6 +64,12 @@ export function createPaymentApp(customDb = null, options = {}) {
   }) : getWhatsAppBerryService());
 
   const merchantRepo = new MerchantRepository(db);
+  if (!isCustom) {
+    const integrations = merchantRepo.ensureFirstPartyIntegrations();
+    if (integrations.length) {
+      console.info('[gateway] First-party integrations provisioned:', integrations.map(item => item.slug).join(', '));
+    }
+  }
   const accountRepo = new ReceivingAccountRepository(db);
   const customerRepo = new CustomerRepository(db);
   const customerSessionRepo = new CustomerSessionRepository(db, customerRepo);
