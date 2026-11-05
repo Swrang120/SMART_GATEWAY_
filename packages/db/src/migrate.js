@@ -88,6 +88,45 @@ export function runMigrations(targetDb) {
   // Execute schema DDL
   db.exec(schemaSql);
 
+  // Upgrade the durable webhook outbox constraint in-place. Existing rows are
+  // preserved; only new RECONCILED transitions are added to the event allow-list.
+  try {
+    const outboxDefinition = db.queryOne(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payment_webhook_outbox'"
+    );
+    if (outboxDefinition?.sql && !outboxDefinition.sql.includes("'RECONCILED'")) {
+      db.transaction(() => {
+        db.exec('DROP TRIGGER IF EXISTS trg_terminal_payment_webhook_outbox;');
+        db.exec('ALTER TABLE payment_webhook_outbox RENAME TO payment_webhook_outbox_legacy;');
+        db.exec(`
+          CREATE TABLE payment_webhook_outbox (
+            payment_id TEXT PRIMARY KEY REFERENCES payment_sessions(id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL CHECK(event_type IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          );
+        `);
+        db.exec(`
+          INSERT INTO payment_webhook_outbox (payment_id, event_type, created_at)
+          SELECT payment_id, event_type, created_at FROM payment_webhook_outbox_legacy;
+        `);
+        db.exec('DROP TABLE payment_webhook_outbox_legacy;');
+        db.exec(`
+          CREATE TRIGGER trg_terminal_payment_webhook_outbox
+          AFTER UPDATE OF status ON payment_sessions
+          WHEN NEW.status IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')
+           AND OLD.status NOT IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')
+          BEGIN
+            INSERT OR IGNORE INTO payment_webhook_outbox (payment_id, event_type)
+            VALUES (NEW.id, NEW.status);
+          END;
+        `);
+      });
+    }
+  } catch (err) {
+    console.error('[migrate] Could not upgrade payment webhook outbox; refusing to silently skip durable settlement events:', err.message);
+    throw err;
+  }
+
   // Alter table columns if migrating existing databases
   try { db.exec("ALTER TABLE payment_sessions ADD COLUMN verification_level INTEGER DEFAULT 0;"); } catch {}
   try { db.exec("ALTER TABLE payment_sessions ADD COLUMN verification_sources TEXT DEFAULT '[]';"); } catch {}
