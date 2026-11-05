@@ -105,8 +105,8 @@ export class WebhookEngine {
     // is missing or unsafe, KEEP that entry instead of recording an irrecoverable
     // synthetic failure row; the operator can repair configuration and replay.
     const isOutboxed = Boolean(this.db.queryOne(
-      'SELECT payment_id FROM payment_webhook_outbox WHERE payment_id = ?',
-      [session.id]
+      'SELECT payment_id FROM payment_webhook_outbox WHERE payment_id = ? AND event_type = ?',
+      [session.id, publicOutcome]
     ));
 
     // Direct non-outboxed dispatches still write an auditable failure record.
@@ -349,11 +349,14 @@ export class WebhookEngine {
       SELECT ps.*
       FROM payment_sessions ps
       JOIN merchants m ON m.id = ps.merchant_id
-      WHERE ps.status IN ('SUCCESS', 'FAILED', 'EXPIRED', 'CANCELLED')
+      WHERE ps.status IN ('RECONCILED', 'SUCCESS', 'FAILED', 'EXPIRED', 'CANCELLED')
         AND m.webhook_url IS NOT NULL AND m.webhook_url != ''
         AND m.webhook_secret IS NOT NULL AND m.webhook_secret != ''
         AND NOT EXISTS (
-          SELECT 1 FROM webhook_deliveries wd WHERE wd.payment_id = ps.id
+          SELECT 1 FROM webhook_deliveries wd WHERE wd.payment_id = ps.id AND wd.event_type = ps.status
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_webhook_outbox o WHERE o.payment_id = ps.id AND o.event_type = ps.status
         )
       LIMIT 100
     `);
