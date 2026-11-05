@@ -202,14 +202,14 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_retry ON webhook_deliveries (i
 -- Only NEW terminal transitions are queued; migrations must never replay historic orders.
 CREATE TABLE IF NOT EXISTS payment_webhook_outbox (
     payment_id TEXT PRIMARY KEY REFERENCES payment_sessions(id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL CHECK(event_type IN ('SUCCESS','FAILED','EXPIRED','CANCELLED')),
+    event_type TEXT NOT NULL CHECK(event_type IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TRIGGER IF NOT EXISTS trg_terminal_payment_webhook_outbox
 AFTER UPDATE OF status ON payment_sessions
-WHEN NEW.status IN ('SUCCESS','FAILED','EXPIRED','CANCELLED')
- AND OLD.status NOT IN ('SUCCESS','FAILED','EXPIRED','CANCELLED')
+WHEN NEW.status IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')
+ AND OLD.status NOT IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','RECONCILED')
 BEGIN
     INSERT OR IGNORE INTO payment_webhook_outbox (payment_id, event_type)
     VALUES (NEW.id, NEW.status);
