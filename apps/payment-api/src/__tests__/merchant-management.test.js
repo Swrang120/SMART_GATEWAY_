@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Database } from '@youpi/db';
+import { Database, MerchantRepository } from '@youpi/db';
 import { startServer as startPaymentApi } from '../index.js';
 import { authFetch } from '../../../../scripts/test-support.js';
 
@@ -130,5 +130,39 @@ describe('Merchant Management & Multi-Tenant Onboarding Test Suite', () => {
     const successBody = await successRes.json();
     assert.ok(successBody.paymentId);
     assert.strictEqual(successBody.orderId, 'ORDER-NOVA-101');
+  });
+
+  it('provisions isolated MAIRA and SMART MONEY integrations idempotently', () => {
+    const repo = new MerchantRepository(testDb);
+    const env = {
+      NODE_ENV: 'test',
+      MAIRA_GATEWAY_API_KEY: `mk_test_${'a'.repeat(48)}`,
+      MAIRA_GATEWAY_WEBHOOK_SECRET: 'maira_secret_' + 'm'.repeat(40),
+      MAIRA_GATEWAY_WEBHOOK_URL: 'https://maira.example.test/api/gateway/webhook',
+      SMART_MONEY_GATEWAY_API_KEY: `mk_test_${'b'.repeat(48)}`,
+      SMART_MONEY_GATEWAY_WEBHOOK_SECRET: 'smart_secret_' + 's'.repeat(40),
+      SMART_MONEY_GATEWAY_WEBHOOK_URL: 'https://smart-money.example.test/api/gateway/webhook'
+    };
+    const first = repo.ensureFirstPartyIntegrations(env);
+    const second = repo.ensureFirstPartyIntegrations(env);
+    assert.equal(first.length, 2);
+    assert.equal(second.length, 2);
+    assert.notEqual(first[0].id, first[1].id);
+
+    const maira = repo.findBySlug('maira-ai-voice-agent');
+    const smartMoney = repo.findBySlug('smart-money');
+    assert.ok(repo.verifyApiKey(maira, env.MAIRA_GATEWAY_API_KEY));
+    assert.ok(repo.verifyApiKey(smartMoney, env.SMART_MONEY_GATEWAY_API_KEY));
+    assert.equal(maira.webhookSecret, env.MAIRA_GATEWAY_WEBHOOK_SECRET);
+    assert.equal(smartMoney.webhookSecret, env.SMART_MONEY_GATEWAY_WEBHOOK_SECRET);
+    assert.equal(maira.webhookUrl, env.MAIRA_GATEWAY_WEBHOOK_URL);
+    assert.equal(smartMoney.webhookUrl, env.SMART_MONEY_GATEWAY_WEBHOOK_URL);
+  });
+
+  it('rejects partial first-party integration configuration', () => {
+    const repo = new MerchantRepository(testDb);
+    assert.throws(() => repo.ensureFirstPartyIntegrations({
+      MAIRA_GATEWAY_API_KEY: 'mk_test_' + 'x'.repeat(48)
+    }), /Incomplete first-party gateway configuration/);
   });
 });
