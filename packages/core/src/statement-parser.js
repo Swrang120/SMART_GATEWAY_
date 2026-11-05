@@ -85,7 +85,9 @@ export function rupeesToPaise(raw) {
   const cleaned = text.replace(/[₹,\s]/g, '').replace(/(cr|dr)$/i, '');
   if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
   const [whole, frac = ''] = cleaned.split('.');
-  return Number(whole) * 100 + Number(frac.padEnd(2, '0'));
+  const paise = Number(whole) * 100 + Number(frac.padEnd(2, '0'));
+  // Never round large statement amounts: an imprecise integer could match the wrong order.
+  return Number.isSafeInteger(paise) ? paise : null;
 }
 
 export function parseStatementDate(raw) {
