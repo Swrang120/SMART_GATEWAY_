@@ -62,7 +62,7 @@ test('database migration preserves legacy outbox rows and upgrades the event con
     runMigrations(db);
     const merchants = new MerchantRepository(db);
     const sessions = new PaymentSessionRepository(db);
-    const merchant = merchants.findBySlug('demo-store');
+    const merchant = merchants.findAll()[0];
     const prior = sessions.create({
       merchantId: merchant.id,
       orderId: 'LEGACY-OUTBOX-ROW',
