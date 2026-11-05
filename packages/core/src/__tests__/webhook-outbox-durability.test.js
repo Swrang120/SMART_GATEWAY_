@@ -56,6 +56,56 @@ test('outbox survives terminal transition and is prepared before network dispatc
   }
 });
 
+test('database migration preserves legacy outbox rows and upgrades the event constraint', () => {
+  const db = new Database({ inMemory: true });
+  try {
+    runMigrations(db);
+    const merchants = new MerchantRepository(db);
+    const sessions = new PaymentSessionRepository(db);
+    const merchant = merchants.findBySlug('demo-store');
+    const prior = sessions.create({
+      merchantId: merchant.id,
+      orderId: 'LEGACY-OUTBOX-ROW',
+      amountPaise: 100n,
+      status: 'ACTIVE'
+    });
+
+    db.exec('DROP TRIGGER IF EXISTS trg_terminal_payment_webhook_outbox;');
+    db.exec('DROP TABLE payment_webhook_outbox;');
+    db.exec(`
+      CREATE TABLE payment_webhook_outbox (
+        payment_id TEXT PRIMARY KEY REFERENCES payment_sessions(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL CHECK(event_type IN ('SUCCESS','FAILED','EXPIRED','CANCELLED')),
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `);
+    db.execute(
+      "INSERT INTO payment_webhook_outbox (payment_id, event_type) VALUES (?, 'EXPIRED')",
+      [prior.id]
+    );
+
+    runMigrations(db);
+    assert.equal(
+      db.queryOne('SELECT event_type FROM payment_webhook_outbox WHERE payment_id = ?', [prior.id]).event_type,
+      'EXPIRED'
+    );
+
+    const reconciled = sessions.create({
+      merchantId: merchant.id,
+      orderId: 'MIGRATED-RECONCILED',
+      amountPaise: 25000n,
+      status: 'OBSERVED_SUCCESS'
+    });
+    sessions.transitionToTerminal(reconciled.id, 'RECONCILED');
+    assert.equal(
+      db.queryOne('SELECT event_type FROM payment_webhook_outbox WHERE payment_id = ?', [reconciled.id]).event_type,
+      'RECONCILED'
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('RECONCILED transitions are durably queued and delivered after a process restart', async () => {
   const { db, sessions, engine } = fixture('durable-reconciled');
   const previousFetch = globalThis.fetch;
