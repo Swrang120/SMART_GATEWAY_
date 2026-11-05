@@ -92,18 +92,32 @@ export function rupeesToPaise(raw) {
 
 export function parseStatementDate(raw) {
   const text = String(raw || '').trim();
-  let match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
-  match = /^(\d{2})[/-](\d{2})[/-](\d{4})$/.exec(text);
-  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
-  match = /^(\d{2})[/-](\d{2})[/-](\d{2})$/.exec(text);
+  let year;
+  let month;
+  let day;
+  let match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(text);
   if (match) {
-    const year = Number(match[3]) < 70 ? 2000 + Number(match[3]) : 1900 + Number(match[3]);
-    return `${year}-${match[2]}-${match[1]}`;
+    [, year, month, day] = match;
+  } else {
+    match = /^(\\d{2})[/-](\\d{2})[/-](\\d{4})$/.exec(text);
+    if (match) {
+      [, day, month, year] = match;
+    } else {
+      match = /^(\\d{2})[/-](\\d{2})[/-](\\d{2})$/.exec(text);
+      if (!match) return null;
+      [, day, month] = match;
+      year = String(Number(match[3]) < 70 ? 2000 + Number(match[3]) : 1900 + Number(match[3]));
+    }
   }
-  return null;
-}
 
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (y < 1900 || y > 9999 || m < 1 || m > 12) return null;
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (d < 1 || d > daysInMonth) return null;
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
 export function extractTwelveDigitReferences(narration, ref) {
   const found = `${ref || ''} ${narration || ''}`.match(/\d{12}/g) || [];
   return [...new Set(found)];
