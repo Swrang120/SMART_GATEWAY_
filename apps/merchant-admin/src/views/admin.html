@@ -4775,7 +4775,7 @@
       if (!select) return;
       select.innerHTML = '<option value="">Loading receiving accounts…</option>';
       try {
-        const response = await fetch(`${API_BASE}/api/v1/admin/upi-accounts`);
+        const response = await fetch(`${API_BASE}/api/v1/admin/upi-accounts?merchantId=${encodeURIComponent(currentMerchantId || '')}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Could not load receiving accounts.');
         const accounts = (data.accounts || []).filter(account => account.isActive);
