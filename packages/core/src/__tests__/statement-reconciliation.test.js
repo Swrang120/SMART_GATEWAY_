@@ -2,7 +2,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Database, runMigrations, PaymentSessionRepository, ObservationRepository, SupportTicketRepository, AuditLogRepository } from '@youpi/db';
 import { PaymentStatus, ObserverSource } from '@youpi/common';
-import { AttributionEngine, ObservationNormalizer, StatementReconciliation, parseStatementCsv, rupeesToPaise } from '@youpi/core';
+import { AttributionEngine, ObservationNormalizer, StatementReconciliation, parseStatementCsv, parseStatementDate, rupeesToPaise } from '@youpi/core';
 
 const ACCOUNT_ID = '00000000-0000-0000-0000-000000000002';
 
@@ -221,5 +221,18 @@ describe('bank statement reconciliation', () => {
   test('rejects a file that has no statement header', () => {
     const result = engine.importCsv({ receivingAccountId: ACCOUNT_ID, csvText: 'hello,world\n1,2\n' });
     assert.equal(result.error, 'UNSUPPORTED_STATEMENT');
+  });
+
+  test('rejects impossible calendar dates instead of normalizing them', () => {
+    assert.equal(parseStatementDate('31/02/2026'), null);
+    assert.equal(parseStatementDate('2026-13-01'), null);
+    assert.equal(parseStatementDate('00/12/2026'), null);
+    assert.equal(parseStatementDate('29/02/2024'), '2024-02-29');
+    assert.equal(parseStatementDate('31/12/2026'), '2026-12-31');
+  });
+
+  test('rejects statement amounts whose paise value is not a safe integer', () => {
+    assert.equal(rupeesToPaise('90071992547409.92'), null);
+    assert.equal(rupeesToPaise('1499.50'), 149950);
   });
 });
