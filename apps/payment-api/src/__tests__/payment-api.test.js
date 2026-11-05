@@ -175,6 +175,30 @@ describe('Payment API End-to-End HTTP Integration Tests', () => {
     assert.ok(stateB.body.upiUri);
   });
 
+  test('production payment creation rejects anonymous default-merchant requests', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousRequireKey = process.env.REQUIRE_MERCHANT_API_KEY;
+    process.env.NODE_ENV = 'production';
+    delete process.env.REQUIRE_MERCHANT_API_KEY;
+    try {
+      const res = await request('/api/v1/payments', {
+        method: 'POST',
+        body: {
+          orderId: 'PRODUCTION-ANON-REJECT',
+          amount: '10.00',
+          currency: 'INR'
+        }
+      });
+      assert.equal(res.status, 401);
+      assert.equal(res.body.code, 'MISSING_MERCHANT_CREDENTIAL');
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousRequireKey === undefined) delete process.env.REQUIRE_MERCHANT_API_KEY;
+      else process.env.REQUIRE_MERCHANT_API_KEY = previousRequireKey;
+    }
+  });
+
   test('Customer registration, login, and decommissioned customer ticket routes', async () => {
     // 1. Customer registration
     const regRes = await request('/api/v1/customer/register', {
