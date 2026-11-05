@@ -56,6 +56,42 @@ test('outbox survives terminal transition and is prepared before network dispatc
   }
 });
 
+test('RECONCILED transitions are durably queued and delivered after a process restart', async () => {
+  const { db, sessions, engine } = fixture('durable-reconciled');
+  const previousFetch = globalThis.fetch;
+  try {
+    const session = sessions.create({
+      merchantId: engine.merchantRepo.findBySlug('durable-reconciled').id,
+      orderId: 'DURABLE-RECONCILED-1',
+      amountPaise: 25000n,
+      status: 'OBSERVED_SUCCESS'
+    });
+    sessions.transitionToTerminal(session.id, 'RECONCILED');
+    const queued = db.queryOne(
+      'SELECT event_type FROM payment_webhook_outbox WHERE payment_id = ?',
+      [session.id]
+    );
+    assert.equal(queued.event_type, 'RECONCILED');
+
+    let requests = 0;
+    globalThis.fetch = async (_url, options) => {
+      requests++;
+      assert.equal(options.headers['X-Gateway-Event'], 'RECONCILED');
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.settlementState, 'RECONCILED');
+      return { ok: true, status: 200, text: async () => 'ok' };
+    };
+    const recovered = await engine.recoverOutbox();
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0].delivered, true);
+    assert.equal(requests, 1);
+    assert.equal(db.queryOne('SELECT payment_id FROM payment_webhook_outbox WHERE payment_id = ?', [session.id]), null);
+  } finally {
+    globalThis.fetch = previousFetch;
+    db.close();
+  }
+});
+
 test('interrupted first attempt remains eligible for restart retry with the same delivery ID and body', async () => {
   const { db, sessions, merchant, engine, merchants } = fixture('durable-restart');
   const previousFetch = globalThis.fetch;
