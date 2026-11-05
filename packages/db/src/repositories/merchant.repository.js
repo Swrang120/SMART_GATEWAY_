@@ -206,6 +206,88 @@ export class MerchantRepository {
     };
   }
 
+  /**
+   * Provision the two private first-party integrations from server-only environment
+   * variables. API keys are stored as hashes and webhook secrets encrypted at rest.
+   * An integration is skipped only when all of its variables are absent; partial
+   * configuration fails startup rather than silently creating a weak/default tenant.
+   */
+  ensureFirstPartyIntegrations(env = process.env) {
+    const definitions = [
+      {
+        slug: 'maira-ai-voice-agent',
+        businessName: 'MAIRA AI VOICE AGENT',
+        appName: 'MAIRA AI VOICE AGENT',
+        id: 'a2d5d2b8-2b11-4f8d-9c31-2f6a6e0b0001',
+        apiKey: env.MAIRA_GATEWAY_API_KEY,
+        webhookSecret: env.MAIRA_GATEWAY_WEBHOOK_SECRET,
+        webhookUrl: env.MAIRA_GATEWAY_WEBHOOK_URL
+      },
+      {
+        slug: 'smart-money',
+        businessName: 'SMART MONEY',
+        appName: 'SMART MONEY',
+        id: 'a2d5d2b8-2b11-4f8d-9c31-2f6a6e0b0002',
+        apiKey: env.SMART_MONEY_GATEWAY_API_KEY,
+        webhookSecret: env.SMART_MONEY_GATEWAY_WEBHOOK_SECRET,
+        webhookUrl: env.SMART_MONEY_GATEWAY_WEBHOOK_URL
+      }
+    ];
+
+    const provisioned = [];
+    for (const definition of definitions) {
+      const values = [definition.apiKey, definition.webhookSecret, definition.webhookUrl];
+      if (values.every(value => value === undefined || value === null || String(value).trim() === '')) continue;
+      if (values.some(value => typeof value !== 'string' || !value.trim())) {
+        throw new Error(`Incomplete first-party gateway configuration for ${definition.slug}.`);
+      }
+      if (definition.apiKey.trim().length < 40 || definition.webhookSecret.trim().length < 32) {
+        throw new Error(`First-party API key/webhook secret is too short for ${definition.slug}.`);
+      }
+      let endpoint;
+      try { endpoint = new URL(definition.webhookUrl.trim()); } catch {
+        throw new Error(`Invalid webhook URL for ${definition.slug}.`);
+      }
+      const localHttpAllowed = env.NODE_ENV !== 'production'
+        && endpoint.protocol === 'http:'
+        && ['localhost', '127.0.0.1'].includes(endpoint.hostname);
+      if (endpoint.protocol !== 'https:' && !localHttpAllowed) {
+        throw new Error(`First-party webhook URL must use HTTPS for ${definition.slug}.`);
+      }
+      if (endpoint.username || endpoint.password) {
+        throw new Error(`Webhook URL must not contain embedded credentials for ${definition.slug}.`);
+      }
+
+      const existing = this.findBySlug(definition.slug);
+      const branding = {
+        ...(existing?.branding || {}),
+        appName: definition.appName,
+        integrationType: 'FIRST_PARTY',
+        integrationKey: definition.slug
+      };
+      const merchant = existing
+        ? this.update(existing.id, {
+            webhookUrl: endpoint.href,
+            webhookSecret: definition.webhookSecret.trim(),
+            apiKey: definition.apiKey.trim(),
+            branding
+          })
+        : this.create({
+            id: definition.id,
+            businessName: definition.businessName,
+            slug: definition.slug,
+            contactEmail: 'payments@local.invalid',
+            contactPhone: '0000000000',
+            webhookUrl: endpoint.href,
+            webhookSecret: definition.webhookSecret.trim(),
+            apiKey: definition.apiKey.trim(),
+            branding
+          });
+      provisioned.push({ id: merchant.id, slug: merchant.slug });
+    }
+    return provisioned;
+  }
+
   mapRow(row) {
     const webhookSecret = decryptAtRest(row.webhook_secret);
     const branding = deserializeBranding(row.branding);
