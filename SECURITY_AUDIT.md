@@ -8,12 +8,19 @@ This is a targeted static review, not an exhaustive independent penetration test
 
 | Area | Source | What changed |
 | --- | --- | --- |
-| Terminal event durability | `packages/db/src/sqlite-schema.sql`, `schema.sql` | An outbox trigger writes a terminal event in the same SQLite status-update transaction. Migrating existing database records does not enqueue historical terminal orders. |
+| Terminal event durability | `packages/db/src/sqlite-schema.sql`, `schema.sql`, `migrate.js`, `packages/core/src/webhook-engine.js` | Outbox now includes `RECONCILED`; an in-place migration preserves prior rows and adds crash recovery for missing reconciliation deliveries. Historical payments are not replayed. |
 | Crash-safe dispatch | `packages/core/src/webhook-engine.js` | Persist delivery body, ID and retry lease **before** sending HTTP; update result after response. Existing deliveries suppress duplicate event sends. |
 | Startup recovery | `apps/payment-api/src/index.js` | Drain missing outbox deliveries on boot and during the periodic worker; existing pending deliveries continue retrying. |
 | Regression coverage | `packages/core/src/__tests__/webhook-outbox-durability.test.js` | Synthetic pre-fetch persistence, pending outbox replay, duplicate prevention and unchanged body/ID retry. |
 | Safer configuration templates | `.env.example`, `packages/common/src/secrets.js` | Remove published password/secret defaults, generate local service secrets when unset and restrict POSIX secret-directory/file permissions. |
 | Documentation | `README.md`, `ARCHITECTURE.md` | Align runtime with Node 24 and correct claims about timed-out payment verification. |
+
+## Additional feature-branch changes
+
+- **First-party tenant isolation:** MAIRA and SMART MONEY receive separate fixed merchant identities, independent API-key hashes and encrypted webhook secrets. Partial environment configuration fails startup. Production order creation rejects anonymous default-merchant requests.
+- **Statement operator workflow:** the merchant-admin UI now has a Bank Reconciliation view for selecting an active receiving account, uploading a bank CSV and reviewing reconciled/conflict/unmatched rows.
+- **Statement parser hardening:** impossible calendar dates and paise values outside JavaScript's safe integer range are rejected.
+- **Regression tests added:** statement parser edge cases, first-party provisioning/isolation, production anonymous-order rejection, durable RECONCILED delivery and outbox schema migration.
 
 ## Deployment blockers / unresolved areas
 
