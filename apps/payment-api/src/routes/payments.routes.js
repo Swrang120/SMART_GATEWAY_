@@ -107,18 +107,18 @@ export function registerPaymentRoutes(server, ctx) {
         return;
       }
     } else if (!isAdminRequest(req)) {
-      // No credential was presented. The public one-script integration (the browser SDK)
-      // cannot carry a merchant secret, so this path stays open - but only for the
-      // gateway's own default merchant. Naming a different merchant requires that
-      // merchant's key (or an order token), so an anonymous caller still cannot inject
-      // sessions into another tenant's queue.
+      // Production payment creation is always server-to-server. The browser checkout
+      // page receives only a payment ID and never a merchant credential. Keep the
+      // anonymous default-merchant demo path only in non-production development.
+      const merchantAuthRequired = process.env.NODE_ENV === 'production'
+        || process.env.REQUIRE_MERCHANT_API_KEY === 'true';
       const defaultMerchant = ctx.merchantRepo.getDefault
         ? ctx.merchantRepo.getDefault()
         : (ctx.merchantRepo.findById('00000000-0000-0000-0000-000000000001') || ctx.merchantRepo.findAll()[0]);
-      if (!defaultMerchant || merchant.id !== defaultMerchant.id) {
+      if (merchantAuthRequired || !defaultMerchant || merchant.id !== defaultMerchant.id) {
         HttpServer.json(res, 401, {
-          error: 'Merchant API key is required (X-Merchant-Key) for this merchant.',
-          code: 'MISSING_MERCHANT_KEY'
+          error: 'A valid server-side merchant API key or signed order token is required.',
+          code: 'MISSING_MERCHANT_CREDENTIAL'
         });
         return;
       }
