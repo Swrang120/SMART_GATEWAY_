@@ -1484,6 +1484,42 @@
         </div>
       </div>
 
+      <!-- SUB-VIEW 1.4: AUTHORITATIVE BANK STATEMENT RECONCILIATION -->
+      <div id="subViewOpsStatements" hidden>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-heading">🏦 Bank Statement Reconciliation</div>
+              <div class="card-subtext">Import a bank-downloaded CSV. Only an exact receiving-account, amount, UTR and date match can reconcile a payment.</div>
+            </div>
+            <button class="btn btn-secondary" onclick="loadStatementAccounts()">Refresh Accounts</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;align-items:end;">
+            <label style="display:flex;flex-direction:column;gap:.45rem;">Receiving bank account
+              <select id="statementReceivingAccount" class="form-control" aria-label="Receiving bank account">
+                <option value="">Loading receiving accounts…</option>
+              </select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:.45rem;">Bank statement CSV
+              <input id="statementCsvFile" type="file" accept=".csv,text/csv" class="form-control">
+            </label>
+            <button id="statementImportButton" class="btn btn-primary" onclick="importBankStatementCsv()">Import &amp; Reconcile</button>
+          </div>
+          <p style="margin-top:1rem;color:var(--text-muted);font-size:.85rem;">
+            Safety: SMS alerts, UPI screenshots and “Payment Done” clicks are not settlement proof. Upload only an official statement downloaded from the receiving bank. Ambiguous or unmatched rows remain pending/manual review.
+          </p>
+          <div id="statementImportStatus" role="status" aria-live="polite" style="margin-top:1rem;"></div>
+          <div style="overflow-x:auto;margin-top:1rem;">
+            <table>
+              <thead><tr><th>Statement line</th><th>UTR</th><th>Result</th><th>Reason</th><th>Payment ID</th></tr></thead>
+              <tbody id="statementImportRows">
+                <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1.2rem;">No statement imported in this session.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- SUB-VIEW 1.4: PAYMENT OBSERVERS LIVE STATUS -->
       <div id="subViewOpsObservers" hidden>
         <div
@@ -4002,6 +4038,7 @@
           { id: 'subViewOpsLive', label: '📊 Live Monitor & Slots', viewId: 'subViewOpsLive' },
           { id: 'subViewOpsCounter', label: '🏪 Counter Desk (POS Cashier)', viewId: 'subViewOpsCounter' },
           { id: 'subViewOpsTransactions', label: '💳 Transactions Ledger', viewId: 'subViewOpsTransactions' },
+          { id: 'subViewOpsStatements', label: '🏦 Bank Reconciliation', viewId: 'subViewOpsStatements' },
           { id: 'subViewOpsObservers', label: '📡 Payment Observers Status', viewId: 'subViewOpsObservers' }
         ];
       } else if (sectionId === 'storeSettings') {
@@ -4068,6 +4105,7 @@
         else fetchCounterPayments();
       }
       if (subViewId === 'subViewOpsTransactions') fetchPaymentsLedger();
+      if (subViewId === 'subViewOpsStatements') loadStatementAccounts();
       if (subViewId === 'subViewOpsObservers') fetchObserversStatus();
       if (subViewId === 'subViewDevAndroid') {
         fetchObserversStatus();
@@ -4730,6 +4768,70 @@
         alert('Could not load the COD order details.');
       }
     });
+
+    // --- AUTHORITATIVE BANK STATEMENT RECONCILIATION ---
+    async function loadStatementAccounts() {
+      const select = document.getElementById('statementReceivingAccount');
+      if (!select) return;
+      select.innerHTML = '<option value="">Loading receiving accounts…</option>';
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/upi-accounts`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load receiving accounts.');
+        const accounts = (data.accounts || []).filter(account => account.isActive);
+        select.innerHTML = accounts.length
+          ? '<option value="">Select receiving account…</option>' + accounts.map(account =>
+              `<option value="${escapeHtmlValue(account.id)}">${escapeHtmlValue(account.payeeName || 'Receiving account')} — ${escapeHtmlValue(account.upiId || '')}</option>`
+            ).join('')
+          : '<option value="">No active receiving account configured</option>';
+      } catch (error) {
+        select.innerHTML = '<option value="">Could not load receiving accounts</option>';
+        const status = document.getElementById('statementImportStatus');
+        if (status) status.textContent = error.message || 'Could not load receiving accounts.';
+      }
+    }
+
+    async function importBankStatementCsv() {
+      const select = document.getElementById('statementReceivingAccount');
+      const fileInput = document.getElementById('statementCsvFile');
+      const button = document.getElementById('statementImportButton');
+      const status = document.getElementById('statementImportStatus');
+      const rows = document.getElementById('statementImportRows');
+      const file = fileInput?.files?.[0];
+      if (!select?.value) { if (status) status.textContent = 'Select the receiving bank account first.'; return; }
+      if (!file || !/\.csv$/i.test(file.name)) { if (status) status.textContent = 'Choose a bank statement CSV file.'; return; }
+      if (file.size > 2 * 1024 * 1024) { if (status) status.textContent = 'CSV file is too large (maximum 2 MB).'; return; }
+      button.disabled = true;
+      if (status) status.textContent = 'Uploading statement and matching bank credits…';
+      if (rows) rows.innerHTML = '<tr><td colspan="5">Processing statement…</td></tr>';
+      try {
+        const csv = await file.text();
+        const response = await fetch(`${API_BASE}/api/v1/admin/statements/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ receivingAccountId: select.value, csv })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Statement import failed.');
+        const lines = result.lines || [];
+        if (rows) rows.innerHTML = lines.length ? lines.map((line, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td><code>${escapeHtmlValue(line.utr || '—')}</code></td>
+            <td><span class="badge ${line.outcome === 'RECONCILED' ? 'badge-success' : 'badge-warning'}">${escapeHtmlValue(line.outcome || 'UNKNOWN')}</span></td>
+            <td>${escapeHtmlValue(line.matchReason || '—')}</td>
+            <td><code>${escapeHtmlValue(line.paymentSessionId || '—')}</code></td>
+          </tr>`).join('') : '<tr><td colspan="5">No eligible statement lines found.</td></tr>';
+        if (status) status.textContent = `Completed: ${Number(result.reconciled || 0)} reconciled, ${Number(result.conflicts || 0)} conflicts, ${Number(result.unmatched || 0)} unmatched. Only reconciled rows are marked settled.`;
+        if (typeof fetchPaymentsLedger === 'function') fetchPaymentsLedger();
+        fileInput.value = '';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Statement import failed.';
+        if (rows) rows.innerHTML = '<tr><td colspan="5">Import failed. No settlement confirmation was issued by this screen.</td></tr>';
+      } finally {
+        button.disabled = false;
+      }
+    }
 
     // --- TRANSACTIONS LEDGER ---
     async function fetchPaymentsLedger() {
